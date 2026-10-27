@@ -276,6 +276,12 @@ charts:
           - grid-enrollment.db.type=external
           - grid-enrollment.db.external.connectionUrlSecretRef=maas-db-config
 
+      - name: ai-grid-o11y-hub
+        valuesFiles:
+          - docs/examples/values-ai-grid-o11y-hub.yaml
+        setFlags:
+          - skipCrdCheck=true
+
       - name: maas-profile-with-clusterip-route
         setFlags:
           - skipCrdCheck=true

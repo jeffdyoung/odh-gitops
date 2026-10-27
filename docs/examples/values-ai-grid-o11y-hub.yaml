@@ -1,0 +1,54 @@
+# =============================================================================
+# AI Grid usage-log aggregation: the hub
+#
+# A LokiStack on an ACM hub that AI Grid spoke clusters write their MaaS usage
+# records to. The hub runs no OpenShift AI, so no components or services are
+# enabled here — only the Loki operator, which the subchart reuses through
+# dependencies.loki, and object storage.
+#
+# Usage:
+#   helm upgrade --install rhoai ./charts/rhai-on-openshift-chart \
+#     -f docs/examples/values-ai-grid-o11y-hub.yaml \
+#     -n rhoai-gitops --create-namespace
+# =============================================================================
+
+dependencies:
+  loki:
+    enabled: true
+
+ai-grid-o11y-hub:
+  enabled: true
+
+  lokiStack:
+    name: usage-logs
+    # 1x.demo fits a small hub: identical ingestion limits to 1x.extra-small
+    # with no resource requests, but replication factor 1 and no redundancy.
+    size: 1x.demo
+    storageClassName: gp3-csi
+    schemas:
+      - version: v13
+        effectiveDate: "2026-10-01"
+    # Loki keeps everything forever without this.
+    limits:
+      global:
+        retention:
+          days: 30
+
+  objectStorage:
+    # Multicloud Object Gateway: the chart creates the claim, and NOTES.txt
+    # prints the command that turns its outputs into the Loki-shaped Secret.
+    secretName: usage-logs-object-storage
+    obc:
+      create: true
+      storageClassName: openshift-storage.noobaa.io
+    # The MCG endpoint is an in-cluster Service, so the stack needs the
+    # service CA to trust it.
+    serviceCA:
+      enabled: true
+
+  ingest:
+    writer:
+      create: true
+    # A read-only identity for Grafana or a billing job.
+    reader:
+      create: true

@@ -1,0 +1,45 @@
+{{- if .Values.enabled }}
+ai-grid-o11y-hub installed into namespace {{ .Values.namespace }}.
+{{- if .Values.lokiStack.enabled }}
+
+LokiStack {{ include "ai-grid-o11y-hub.lokiStackName" . }} is deploying. It is not usable until
+Ready, and the Loki operator creates the Route only in openshift-logging tenant mode:
+
+  oc wait --for=condition=Ready lokistack/{{ include "ai-grid-o11y-hub.lokiStackName" . }} -n {{ .Values.namespace }} --timeout=15m
+  oc get route {{ include "ai-grid-o11y-hub.lokiStackName" . }} -n {{ .Values.namespace }} -o jsonpath='{.spec.host}{"\n"}'
+
+The ingest endpoint spokes write to is that host plus the tenant path:
+
+  https://<route-host>/api/logs/v1/{{ include "ai-grid-o11y-hub.tenant" . }}/otlp
+{{- if .Values.objectStorage.obc.create }}
+
+An ObjectBucketClaim was created, but its credentials are NOT in the storage Secret: ODF
+publishes them under key names the Loki operator does not read, and nothing translates them.
+Until you run this, the LokiStack will not become Ready:
+
+  NS={{ .Values.namespace }}
+  OBC={{ include "ai-grid-o11y-hub.obcName" . }}
+  oc create secret generic {{ include "ai-grid-o11y-hub.storageSecretName" . }} -n "$NS" \
+    --from-literal=bucketnames="$(oc get cm $OBC -n $NS -o jsonpath='{.data.BUCKET_NAME}')" \
+    --from-literal=endpoint="https://s3.openshift-storage.svc:443" \
+    --from-literal=access_key_id="$(oc get secret $OBC -n $NS -o jsonpath='{.data.AWS_ACCESS_KEY_ID}' | base64 -d)" \
+    --from-literal=access_key_secret="$(oc get secret $OBC -n $NS -o jsonpath='{.data.AWS_SECRET_ACCESS_KEY}' | base64 -d)" \
+    --dry-run=client -o yaml | oc apply -f -
+{{- end }}
+{{- if .Values.ingest.writer.create }}
+
+Spokes authenticate as {{ include "ai-grid-o11y-hub.writerName" . }}. The chart creates the
+identity but cannot mint its token, which is not a declarative object:
+
+  oc create token {{ include "ai-grid-o11y-hub.writerName" . }} -n {{ .Values.namespace }} --duration=8760h
+
+Nothing rotates that token and no object reports its age. Treat the expiry as an operational
+commitment, not a default.
+{{- end }}
+{{- else }}
+
+lokiStack.enabled is false: no store, object storage or ingest identity was rendered.
+{{- end }}
+{{- else }}
+ai-grid-o11y-hub rendered nothing: enabled is false.
+{{- end }}

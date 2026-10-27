@@ -1,161 +1,120 @@
-# Default values for ai-grid-o11y-hub.
-# This is a YAML-formatted file.
-# Declare variables to be passed into your templates.
+# ai-grid-o11y-hub renders the hub side of AI Grid usage-log aggregation: a LokiStack that
+# spoke clusters write their MaaS usage records to, plus the identities that authorize the
+# write. It installs on the ACM hub and needs no RHOAI — only the Loki operator, which the
+# parent chart provides through `dependencies.loki`.
+#
+# Nothing here is created unless `enabled` is true.
 
-# This will set the replicaset count more information can be found here: https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/
-replicaCount: 1
+# -- Render this chart. The parent gates the subchart on the same key.
+enabled: false
 
-# This sets the container image more information can be found here: https://kubernetes.io/docs/concepts/containers/images/
-image:
-  repository: nginx
-  # This sets the pull policy for images.
-  pullPolicy: IfNotPresent
-  # Overrides the image tag whose default is the chart appVersion.
-  tag: ""
+# -- Namespace holding the LokiStack, its storage Secret and the ingest identities.
+namespace: ai-grid-o11y
 
-# This is for the secrets for pulling an image from a private repository more information can be found here: https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/
-imagePullSecrets: []
-# This is to override the chart name.
-nameOverride: ""
-fullnameOverride: ""
+# -- Create `namespace`. Set false when it is managed elsewhere.
+createNamespace: true
 
-# This section builds out the service account more information can be found here: https://kubernetes.io/docs/concepts/security/service-accounts/
-serviceAccount:
-  # Specifies whether a service account should be created.
-  create: true
-  # Automatically mount a ServiceAccount's API credentials?
-  automount: true
-  # Annotations to add to the service account.
-  annotations: {}
-  # The name of the service account to use.
-  # If not set and create is true, a name is generated using the fullname template.
-  name: ""
+# -- Labels added to every object this chart renders.
+commonLabels: {}
 
-# This is for setting Kubernetes Annotations to a Pod.
-# For more information checkout: https://kubernetes.io/docs/concepts/overview/working-with-objects/annotations/
-podAnnotations: {}
-# This is for setting Kubernetes Labels to a Pod.
-# For more information checkout: https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/
-podLabels: {}
+lokiStack:
+  # -- Render the store: the LokiStack, its object storage and the ingest identities. Set
+  # false to render nothing but the distribution policy, for a hub that forwards to a
+  # LokiStack this chart did not create — the endpoint is only a string, so the store may
+  # live anywhere. Everything under `objectStorage` and `ingest` is skipped with it.
+  enabled: true
 
-podSecurityContext: {}
-  # fsGroup: 2000
+  # -- LokiStack name. It also prefixes the storage Secret, the ingest ClusterRoles and the
+  # Route the Loki operator creates, so the ingest endpoint is
+  # `https://<name>-<namespace>.apps.<hub-domain>/api/logs/v1/infrastructure/otlp`.
+  name: usage-logs
 
-securityContext: {}
-  # capabilities:
-  #   drop:
-  #   - ALL
-  # readOnlyRootFilesystem: true
-  # runAsNonRoot: true
-  # runAsUser: 1000
+  # -- Loki t-shirt size. `1x.extra-small` reserves 2 CPU and 8Gi per ingester across two
+  # replicas and will not schedule on a small hub; `1x.demo` carries identical ingestion
+  # limits (4 MB/s sustained, 6 MB burst, 5 MB per stream) with no resource requests and
+  # replication factor 1, but has no redundancy and is documented by Loki as demo-only.
+  size: 1x.extra-small
 
-# This is for setting up a service more information can be found here: https://kubernetes.io/docs/concepts/services-networking/service/
-service:
-  # This sets the service type more information can be found here: https://kubernetes.io/docs/concepts/services-networking/service/#publishing-services-service-types
-  type: ClusterIP
-  # This sets the ports more information can be found here: https://kubernetes.io/docs/concepts/services-networking/service/#field-spec-ports
-  port: 80
+  # -- StorageClass for the ingester, compactor and index-gateway volumes. Must be RWO.
+  storageClassName: gp3-csi
 
-# This block is for setting up the ingress for more information can be found here: https://kubernetes.io/docs/concepts/services-networking/ingress/
-ingress:
-  enabled: false
-  className: ""
-  annotations: {}
-    # kubernetes.io/ingress.class: nginx
-    # kubernetes.io/tls-acme: "true"
-  hosts:
-    - host: chart-example.local
-      paths:
-        - path: /
-          pathType: ImplementationSpecific
-  tls: []
-    # - secretName: chart-example-tls
-    #   hosts:
-    #     - chart-example.local
+  # -- Object storage schemas. `effectiveDate` must not be in the future at install time or
+  # the stack never becomes Ready, so it has no default and must be set.
+  schemas:
+    - version: v13
+      effectiveDate: ""
 
-# -- Expose the service via gateway-api HTTPRoute
-# Requires Gateway API resources and suitable controller installed within the cluster
-# (see: https://gateway-api.sigs.k8s.io/guides/)
-httpRoute:
-  # HTTPRoute enabled.
-  enabled: false
-  # HTTPRoute annotations.
-  annotations: {}
-  # Which Gateways this Route is attached to.
-  parentRefs:
-  - name: gateway
-    sectionName: http
-    # namespace: default
-  # Hostnames matching HTTP header.
-  hostnames:
-  - chart-example.local
-  # List of rules and filters applied.
-  rules:
-  - matches:
-    - path:
-        type: PathPrefix
-        value: /headers
-  #   filters:
-  #   - type: RequestHeaderModifier
-  #     requestHeaderModifier:
-  #       set:
-  #       - name: My-Overwrite-Header
-  #         value: this-is-the-only-value
-  #       remove:
-  #       - User-Agent
-  # - matches:
-  #   - path:
-  #       type: PathPrefix
-  #       value: /echo
-  #     headers:
-  #     - name: version
-  #       value: v2
+  # -- `spec.limits`, passed through. Retention lives here and Loki keeps everything
+  # forever without it, e.g. `global: {retention: {days: 30}}`. The hub carries aggregated
+  # fleet volume, so this is a sizing decision the chart cannot make.
+  limits: {}
 
-resources: {}
-  # We usually recommend not to specify default resources and to leave this as a conscious
-  # choice for the user. This also increases chances charts run on environments with little
-  # resources, such as Minikube. If you do want to specify resources, uncomment the following
-  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
-  # limits:
-  #   cpu: 100m
-  #   memory: 128Mi
-  # requests:
-  #   cpu: 100m
-  #   memory: 128Mi
+  # -- `spec.template`, passed through, for per-component replicas, tolerations and node
+  # placement.
+  template: {}
 
-# This is to setup the liveness and readiness probes more information can be found here: https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
-livenessProbe:
-  httpGet:
-    path: /
-    port: http
-readinessProbe:
-  httpGet:
-    path: /
-    port: http
+objectStorage:
+  # -- Name of the S3-shaped Secret the LokiStack reads. The Loki operator requires the
+  # keys `bucketnames`, `endpoint`, `access_key_id` and `access_key_secret`.
+  secretName: ""
 
-# This section is for setting up autoscaling more information can be found here: https://kubernetes.io/docs/concepts/workloads/autoscaling/
-autoscaling:
-  enabled: false
-  minReplicas: 1
-  maxReplicas: 100
-  targetCPUUtilizationPercentage: 80
-  # targetMemoryUtilizationPercentage: 80
+  secret:
+    # -- Render the storage Secret from the values below. Leave false and set
+    # `objectStorage.secretName` to bring your own, which is the right choice when the
+    # credentials come from a cloud credential operator.
+    create: false
+    # -- Bucket name.
+    bucketNames: ""
+    # -- S3 endpoint, e.g. `https://s3.openshift-storage.svc:443` for Multicloud Object
+    # Gateway or `https://s3.us-east-1.amazonaws.com`.
+    endpoint: ""
+    # -- Region, for endpoints that require it.
+    region: ""
+    # -- Access key id.
+    accessKeyId: ""
+    # -- Access key secret.
+    accessKeySecret: ""
 
-# Additional volumes on the output Deployment definition.
-volumes: []
-  # - name: foo
-  #   secret:
-  #     secretName: mysecret
-  #     optional: false
+  obc:
+    # -- Render an ObjectBucketClaim, for a hub with OpenShift Data Foundation. The claim's
+    # credentials are **not** copied into the storage Secret: ODF publishes them under
+    # different key names than Loki reads, and no controller translates them. See the
+    # chart README for the one command that does it.
+    create: false
+    # -- ObjectBucketClaim name. Defaults to `<lokiStack.name>-bucket`.
+    name: ""
+    # -- Bucket name prefix; ODF appends a unique suffix.
+    generateBucketName: ""
+    # -- ObjectBucketClaim StorageClass.
+    storageClassName: openshift-storage.noobaa.io
 
-# Additional volumeMounts on the output Deployment definition.
-volumeMounts: []
-  # - name: foo
-  #   mountPath: "/etc/foo"
-  #   readOnly: true
+  serviceCA:
+    # -- Render a service-CA ConfigMap and point `spec.storage.tls` at it. Needed when the
+    # S3 endpoint is an in-cluster Service, whose certificate the stack does not otherwise
+    # trust. An endpoint with a publicly trusted certificate needs neither.
+    enabled: false
+    # -- ConfigMap name.
+    configMapName: openshift-service-ca-bundle
 
-nodeSelector: {}
+# Ingest identities. The tenant is the RBAC resource, not the thing written: a role
+# granting `logs` instead of `infrastructure` authorizes nothing. `oc auth can-i` cannot
+# check these grants, because `loki.grafana.com/infrastructure` is not a served API — use a
+# SubjectAccessReview, or test by writing.
+#
+# The chart creates the identities; it cannot mint their tokens, since a token is not a
+# declarative object. Mint with `oc create token <sa> -n <namespace> --duration=...`.
+ingest:
+  writer:
+    # -- Create the writer ServiceAccount, ClusterRole and binding. This is the identity
+    # every spoke presents, so without it no spoke can write.
+    create: true
+    # -- Writer ServiceAccount name. Defaults to `<lokiStack.name>-writer`.
+    serviceAccountName: ""
 
-tolerations: []
-
-affinity: {}
+  reader:
+    # -- Create a read-only identity, for Grafana, a billing job or any other consumer that
+    # should not be able to write. Off by default: reads also work with any hub user who
+    # already holds the grant, so this is only needed for an unattended consumer.
+    create: false
+    # -- Reader ServiceAccount name. Defaults to `<lokiStack.name>-reader`.
+    serviceAccountName: ""
