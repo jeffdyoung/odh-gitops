@@ -81,6 +81,95 @@ To enable TLS for Authorino:
    kubectl patch authorino/authorino -n {{ $rhclNs }} --type=merge -p '{"spec":{"clusterWide":true,"listener":{"tls":{"enabled":true,"certSecretRef":{"name":"authorino-server-cert"}}},"oidcServer":{"tls":{"enabled":false}}}}'
 {{- end }}
 
+{{- $o11yHub := index .Values "ai-grid-o11y-hub" | default dict }}
+{{- $o11ySpoke := index .Values "ai-grid-o11y-spoke" | default dict }}
+{{- if $o11yHub.enabled }}
+=== AI Grid Usage-Log Hub ===
+
+No object this release renders contains the writer's token: a token is not declarative, so it
+is minted imperatively and handed to spokes. The store needs two imperative steps of its own
+first.
+
+{{- if $o11yHub.lokiStack.enabled }}
+1. The store's CRs are skipped until their operators' CRDs exist, so a first install creates
+   the Loki operator and the ingest identities but not the LokiStack itself. Wait for the
+   CRDs, then run the same helm upgrade --install command again:
+     ./scripts/wait-for-crds.sh
+   oc get lokistack {{ $o11yHub.lokiStack.name }} -n {{ $o11yHub.namespace }} tells you whether this step is still pending.
+{{- if $o11yHub.objectStorage.obc.create }}
+
+2. The ObjectBucketClaim's credentials are NOT in the storage Secret: ODF publishes them
+   under key names the Loki operator does not read, and nothing translates them. The
+   LokiStack stays not Ready until you run this once the claim is Bound:
+     NS={{ $o11yHub.namespace }}
+     OBC={{ $o11yHub.objectStorage.obc.name | default (printf "%s-bucket" $o11yHub.lokiStack.name) }}
+     oc wait --for=jsonpath='{.status.phase}'=Bound obc/$OBC -n "$NS" --timeout=10m
+     oc create secret generic {{ $o11yHub.objectStorage.secretName | default (printf "%s-object-storage" $o11yHub.lokiStack.name) }} -n "$NS" \
+       --from-literal=bucketnames="$(oc get cm $OBC -n $NS -o jsonpath='{.data.BUCKET_NAME}')" \
+       --from-literal=endpoint="https://s3.openshift-storage.svc:443" \
+       --from-literal=access_key_id="$(oc get secret $OBC -n $NS -o jsonpath='{.data.AWS_ACCESS_KEY_ID}' | base64 -d)" \
+       --from-literal=access_key_secret="$(oc get secret $OBC -n $NS -o jsonpath='{.data.AWS_SECRET_ACCESS_KEY}' | base64 -d)" \
+       --dry-run=client -o yaml | oc apply -f -
+{{- end }}
+
+3. Wait for the stack, then read the endpoint spokes write to:
+   oc wait --for=condition=Ready lokistack/{{ $o11yHub.lokiStack.name }} -n {{ $o11yHub.namespace }} --timeout=15m
+   oc get route {{ $o11yHub.lokiStack.name }} -n {{ $o11yHub.namespace }} -o jsonpath='{.spec.host}{"\n"}'
+{{- if $o11yHub.ingest.writer.create }}
+
+4. Mint the token:
+   oc create token {{ $o11yHub.lokiStack.name }}-writer -n {{ $o11yHub.namespace }} --duration=8760h > hub-writer-token
+{{- end }}
+{{- else }}
+lokiStack.enabled is false, so this release renders no store and no writer identity. The
+token below comes from wherever the LokiStack spokes write to actually lives.
+{{- end }}
+
+5. Give it to spokes one of two ways, not both:
+{{- if $o11yHub.spokePolicy.enabled }}
+   ACM, which this release has enabled: put it where the policy reads it, and every
+   selected spoke receives it with no further per-spoke step.
+     oc create secret generic {{ $o11yHub.spokePolicy.credentialSecretName }} -n {{ $o11yHub.spokePolicy.namespace }} \
+       --from-literal=token="$(cat hub-writer-token)"
+   Then label each spoke's ManagedCluster so the Placement selects it.
+{{- else }}
+   ACM: set ai-grid-o11y-hub.spokePolicy.enabled and re-run, then hold the token in a
+   Secret the policy reads. It delivers to every selected spoke.
+{{- end }}
+   Directly: enable credential delivery on the ai-grid-o11y-spoke chart on the spoke
+   cluster and pass the file to it, with
+   --set ai-grid-o11y-spoke.credential.enabled=true
+   --set-file ai-grid-o11y-spoke.credential.token=./hub-writer-token
+
+   Delete the local file afterwards.
+
+See charts/ai-grid-o11y-hub/README.md for the ingest contract and the object-storage paths.
+{{- end }}
+{{- if $o11ySpoke.enabled }}
+=== AI Grid Usage-Log Spoke ===
+
+Namespace {{ $o11ySpoke.collector.namespace }} holds Secret {{ $o11ySpoke.credential.secretName }},
+which the usage-log collector mounts. This chart does not configure forwarding: that is
+services.monitoring.dsci.usageLogs, and its credentialSecret must name the Secret above.
+
+{{- if $o11ySpoke.credential.enabled }}
+credential.enabled places the hub token directly. If this spoke is ALSO selected by a hub
+spokePolicy, two owners end up on the same DSCI fields and on this Secret: the policy keeps
+reporting Compliant because the contents agree, so compliance stops being evidence that ACM
+delivered anything. A spoke in an ACM fleet supplies nothing under services.monitoring.dsci.usageLogs
+and lets the policy deliver all of it — see
+docs/examples/values-ai-grid-o11y-spoke-acm.yaml. This cannot be checked here, because the
+spoke cannot see whether the hub's Placement selects it.
+{{- end }}
+
+Once the collector is running, both exporters should count every inference and neither
+should fail. There are two replicas, so check both:
+   oc port-forward -n {{ $o11ySpoke.collector.namespace }} deploy/data-science-usage-logs-collector 8888
+   curl -s localhost:8888/metrics | grep -E 'otelcol_exporter_(sent|send_failed)_log_records'
+
+See charts/ai-grid-o11y-spoke/README.md.
+{{- end }}
+
 === Documentation ===
 For more information, see the chart README:
 https://github.com/opendatahub-io/odh-gitops/tree/main/charts/rhai-on-openshift-chart

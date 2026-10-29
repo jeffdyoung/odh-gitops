@@ -280,7 +280,65 @@ charts:
         valuesFiles:
           - docs/examples/values-ai-grid-o11y-hub.yaml
         setFlags:
+          # The store's CRs are CRD-gated like every other dependency CR; a
+          # reproducible render needs the subchart to see the flag too.
+          - global.skipCrdCheck=true
           - skipCrdCheck=true
+
+      - name: ai-grid-o11y-hub-spoke-policy
+        valuesFiles:
+          - docs/examples/values-ai-grid-o11y-hub.yaml
+          - docs/examples/values-ai-grid-o11y-spoke-policy.yaml
+        setFlags:
+          # The store's CRs are CRD-gated like every other dependency CR; a
+          # reproducible render needs the subchart to see the flag too.
+          - global.skipCrdCheck=true
+          - skipCrdCheck=true
+
+      - name: ai-grid-o11y-hub-spoke-policy-credential-only
+        valuesFiles:
+          - docs/examples/values-ai-grid-o11y-hub.yaml
+          - docs/examples/values-ai-grid-o11y-spoke-policy.yaml
+        setFlags:
+          - global.skipCrdCheck=true
+          - skipCrdCheck=true
+          # A GitOps fleet: Argo CD renders the DSCI from the chart's own values and an
+          # ApplicationSet supplies the per-cluster attributes, so the policy must not
+          # patch that object too. It delivers the token alone. The endpoint is cleared
+          # here to prove it is no longer read in this mode.
+          - ai-grid-o11y-hub.spokePolicy.deliverConfiguration=false
+          - ai-grid-o11y-hub.spokePolicy.endpoint=
+
+      - name: ai-grid-o11y-hub-spoke-policy-reject-nothing-to-deliver
+        valuesFiles:
+          - docs/examples/values-ai-grid-o11y-hub.yaml
+          - docs/examples/values-ai-grid-o11y-spoke-policy.yaml
+        setFlags:
+          - global.skipCrdCheck=true
+          - skipCrdCheck=true
+          - ai-grid-o11y-hub.spokePolicy.deliverCredential=false
+          - ai-grid-o11y-hub.spokePolicy.deliverConfiguration=false
+        expectFail: true
+        expectMessage: "deliverCredential and/or deliverConfiguration"
+
+      - name: ai-grid-o11y-spoke-acm
+        valuesFiles:
+          - docs/examples/values-ai-grid-o11y-spoke-acm.yaml
+        setFlags:
+          - skipCrdCheck=true
+          - global.skipCrdCheck=true
+          # The ACM path renders no Secret and no subchart objects: the hub's policy supplies
+          # credentialSecret, attributes and exporters, so only storage and size appear.
+
+      - name: ai-grid-o11y-spoke
+        valuesFiles:
+          - docs/examples/values-ai-grid-o11y-spoke.yaml
+        setFlags:
+          - skipCrdCheck=true
+          # The token is a required value with no default; the snapshot needs a
+          # placeholder, never a real credential.
+          - ai-grid-o11y-spoke.credential.token=snapshot-placeholder-token
+          - ai-grid-o11y-spoke.credential.enabled=true
 
       - name: maas-profile-with-clusterip-route
         setFlags:
@@ -408,6 +466,14 @@ charts:
         setFlags:
           - collector.namespace=custom-monitoring
           - collector.port=9999
+
+      - name: credential
+        setFlags:
+          # The usage-log half alone: a spoke outside an ACM fleet, where there is no
+          # open-cluster-management-observability namespace to scrape from.
+          - metrics.enabled=false
+          - credential.enabled=true
+          - credential.token=snapshot-placeholder-token
 
       - name: reject-invalid-port
         expectFail: true

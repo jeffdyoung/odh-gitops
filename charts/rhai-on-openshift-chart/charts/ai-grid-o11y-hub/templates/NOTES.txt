@@ -29,16 +29,72 @@ Until you run this, the LokiStack will not become Ready:
 {{- if .Values.ingest.writer.create }}
 
 Spokes authenticate as {{ include "ai-grid-o11y-hub.writerName" . }}. The chart creates the
-identity but cannot mint its token, which is not a declarative object:
+identity but cannot mint its token, which is not a declarative object, and no object this
+chart renders ever contains it. Mint it here:
 
-  oc create token {{ include "ai-grid-o11y-hub.writerName" . }} -n {{ .Values.namespace }} --duration=8760h
+  oc create token {{ include "ai-grid-o11y-hub.writerName" . }} -n {{ .Values.namespace }} --duration=8760h > hub-writer-token
 
-Nothing rotates that token and no object reports its age. Treat the expiry as an operational
-commitment, not a default.
+It then reaches spokes one of two ways, and you need only one of them.
+{{ if .Values.spokePolicy.enabled }}
+ACM: step 1 below puts it in Secret {{ .Values.spokePolicy.credentialSecretName }}, and the
+policy delivers it to every selected spoke. Nothing else to do per spoke.
+{{- else }}
+ACM: set spokePolicy.enabled and hold it in a Secret this hub's policy reads, which then
+delivers it to every selected spoke.
+{{- end }}
+Directly: hand the file to the ai-grid-o11y-spoke chart on the spoke cluster, which creates
+the Secret its collector mounts:
+
+  helm upgrade --install rhoai ./charts/rhai-on-openshift-chart \
+    -f docs/examples/values-ai-grid-o11y-spoke.yaml \
+    --set-file ai-grid-o11y-spoke.credential.token=./hub-writer-token \
+    -n rhoai-gitops
+
+Either way, delete the local file afterwards. Nothing rotates the token and no object reports
+its age; treat the expiry as an operational commitment, not a default.
 {{- end }}
 {{- else }}
 
 lokiStack.enabled is false: no store, object storage or ingest identity was rendered.
+{{- end }}
+{{- if .Values.spokePolicy.enabled }}
+
+The spoke policy is on. Policy {{ .Values.spokePolicy.name }} targets managed clusters
+labelled{{- range $k, $v := .Values.spokePolicy.placement.matchLabels }} {{ $k }}={{ $v }}{{- end }}.
+
+1. Hold the writer token where the Policy reads it. The chart does not create it:
+
+     oc create secret generic {{ .Values.spokePolicy.credentialSecretName }} -n {{ .Values.spokePolicy.namespace }} \
+       --from-literal=token="$(oc create token {{ include "ai-grid-o11y-hub.writerName" . }} -n {{ .Values.namespace }} --duration=8760h)"
+
+2. Label each spoke so the Placement selects it. Nothing sets these automatically:
+{{- range $k, $v := .Values.spokePolicy.placement.matchLabels }}
+
+     oc label managedcluster <spoke> {{ $k }}={{ $v }}
+{{- end }}
+
+3. Confirm the Placement resolved before looking at compliance:
+
+     oc get placementdecision -n {{ .Values.spokePolicy.namespace }} \
+       -l cluster.open-cluster-management.io/placement={{ .Values.spokePolicy.placement.name }} \
+       -o jsonpath='{.items[*].status.decisions[*].clusterName}{"\n"}'
+
+     oc get policy {{ .Values.spokePolicy.name }} -n {{ .Values.spokePolicy.namespace }}
+{{ if eq .Values.spokePolicy.remediationAction "inform" }}
+remediationAction is inform: drift is reported and nothing is changed. Switch to enforce to
+deliver.
+{{- else }}
+remediationAction is enforce: an object deleted on a spoke is recreated within about one
+evaluation interval.
+{{- end }}
+
+usageLogs.storage is not delivered by this policy. A spoke whose usage logs are not already
+running locally needs it set by whatever installs RHOAI there.
+
+Compliance says the Secret matches the policy, not that the token works. An expired or
+wrongly scoped token distributes as Compliant, and ManagedClusterView refuses Secrets, so
+the hub cannot read back what a spoke holds. The signal that the chain works is records
+arriving here with the right cluster_name.
 {{- end }}
 {{- else }}
 ai-grid-o11y-hub rendered nothing: enabled is false.

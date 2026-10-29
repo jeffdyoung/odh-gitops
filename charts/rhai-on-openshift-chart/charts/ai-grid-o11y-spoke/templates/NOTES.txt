@@ -1,0 +1,36 @@
+{{- if .Values.enabled }}
+ai-grid-o11y-spoke installed. Namespace {{ .Values.collector.namespace }} holds Secret
+{{ .Values.credential.secretName }}, which the usage-log collector mounts.
+
+This chart does NOT configure forwarding. Set it on the parent chart, and make sure
+credentialSecret names the Secret above:
+
+  services:
+    monitoring:
+      dsci:
+        usageLogs:
+          storage: { ... }
+          credentialSecret: {{ .Values.credential.secretName }}
+          attributes:
+            cluster_name: <this cluster>
+            cluster_id: <this cluster's id>
+          exporters:
+            otlphttp/hub:
+              endpoint: https://<hub-route>/api/logs/v1/infrastructure/otlp
+
+Omit the endpoint's /v1/logs suffix: the collector's otlphttp exporter appends it, and a
+doubled suffix 404s every record while reporting nothing else.
+
+Once the collector is up, both exporters should count every inference and neither should
+fail:
+
+  oc port-forward -n {{ .Values.collector.namespace }} deploy/data-science-usage-logs-collector 8888
+  curl -s localhost:8888/metrics | grep -E 'otelcol_exporter_(sent|send_failed)_log_records'
+
+There are two collector replicas, so a single request lands on one of them; check both.
+
+The token expires. Nothing rotates it and no object reports its age — the collector re-reads
+the mounted file, so replacing this Secret is enough, but the schedule is yours.
+{{- else }}
+ai-grid-o11y-spoke rendered nothing: enabled is false.
+{{- end }}

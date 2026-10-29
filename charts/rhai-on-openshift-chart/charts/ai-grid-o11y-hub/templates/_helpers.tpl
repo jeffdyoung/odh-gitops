@@ -69,3 +69,49 @@ objectStorage.secret.create, supplied by the user otherwise.
 {{- .Values.objectStorage.secretName | required "objectStorage.secretName is required unless objectStorage.secret.create is true" }}
 {{- end -}}
 {{- end }}
+
+{{/*
+The ingest endpoint distributed to spokes, validated rather than passed through.
+
+The collector's otlphttp exporter appends /v1/logs itself, so an endpoint that already ends
+in it produces a 404 on every record with no other signal. The tenant segment is equally
+load bearing: a record written to the application tenant is accepted with 204 and then
+matches no query. Both mistakes look like success, so they are caught at render time.
+
+Not derived from lokiStack.name even when this chart renders the store: the host comes from
+the Route the Loki operator creates, whose domain is the cluster's and may carry an
+infrastructure-specific prefix. Computing it would be wrong on exactly the clusters where it
+matters, so it is read once and supplied.
+*/}}
+{{- define "ai-grid-o11y-hub.spokeEndpoint" -}}
+{{- $e := .Values.spokePolicy.endpoint | required "spokePolicy.endpoint is required: the LokiStack Route host plus /api/logs/v1/infrastructure/otlp" -}}
+{{- if hasSuffix "/v1/logs" $e -}}
+{{- fail (printf "spokePolicy.endpoint must not end in /v1/logs; the otlphttp exporter appends it (got %q)" $e) -}}
+{{- end -}}
+{{- if not (contains (printf "/api/logs/v1/%s/" (include "ai-grid-o11y-hub.tenant" .)) $e) -}}
+{{- fail (printf "spokePolicy.endpoint must address the %s tenant: records sent to another tenant are accepted and then unreadable (got %q)" (include "ai-grid-o11y-hub.tenant" .) $e) -}}
+{{- end -}}
+{{- $e -}}
+{{- end }}
+
+{{/*
+Whether a CRD is present, so a CR is skipped until its operator has installed it. The parent
+chart gates every dependency CR this way and tells the installer to re-run `helm upgrade` once
+the CRDs exist; the store does the same, because the release that creates the LokiStack is also
+the release that installs the Loki operator, and `helm install` rejects the whole manifest for an
+unknown kind rather than retrying.
+
+The parent's `rhoai-dependencies.crdExists` reads `.Values.skipCrdCheck` at the parent root,
+which a subchart cannot see, so this reads `global.skipCrdCheck` — Helm passes `global` down —
+and falls back to a live lookup.
+*/}}
+{{- define "ai-grid-o11y-hub.crdExists" -}}
+{{- if (.root.Values.global | default dict).skipCrdCheck -}}
+true
+{{- else -}}
+{{- $crd := lookup "apiextensions.k8s.io/v1" "CustomResourceDefinition" "" .crdName -}}
+{{- if and $crd $crd.metadata -}}
+true
+{{- end -}}
+{{- end -}}
+{{- end }}

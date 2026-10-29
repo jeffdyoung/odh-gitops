@@ -12,27 +12,54 @@
 #     -n rhoai-gitops --create-namespace
 # =============================================================================
 
+# The hub runs no OpenShift AI, so do not install its operator. With this false
+# the DSCInitialization and DataScienceCluster also disappear on a real cluster,
+# because they are gated on their CRDs existing and nothing installs them here.
+# (A render with --set skipCrdCheck=true still shows them; that flag forces the
+# check true, which is why the committed snapshot contains them.)
+operator:
+  enabled: false
+
 dependencies:
   loki:
     enabled: true
+    olm:
+      # openshift-operators-redhat ships with OpenShift, so Helm cannot create it and will
+      # not adopt a namespace it does not own. It has no OperatorGroup by default, so that
+      # one is still ours to create.
+      createNamespace: false
 
 ai-grid-o11y-hub:
   enabled: true
 
   lokiStack:
     name: usage-logs
-    # 1x.demo fits a small hub: identical ingestion limits to 1x.extra-small
-    # with no resource requests, but replication factor 1 and no redundancy.
+    # 1x.demo fits a small hub: identical ingestion limits to 1x.extra-small with a single
+    # ingester and no resource requests. It is the only size with replication factor 1, so
+    # it has NO redundancy and Loki documents it as demo-only -- a production hub must
+    # choose a larger size.
     size: 1x.demo
     storageClassName: gp3-csi
     schemas:
       - version: v13
         effectiveDate: "2026-10-01"
-    # Loki keeps everything forever without this.
     limits:
       global:
+        # Loki keeps everything forever without this. 30 days suits a reference fleet;
+        # a production hub carries aggregated volume and MUST set its own figure --
+        # see the chart README on sizing and retention.
         retention:
           days: 30
+        # Promote the two fleet-identity attributes to stream labels so per-spoke queries
+        # are selectable rather than filtered. Without this the infrastructure tenant has
+        # one index label, log_type, and every fleet query scans the whole tenant.
+        # Cardinality is bounded by fleet size. odh-observability does the same spoke-side
+        # for its application tenant.
+        otlp:
+          streamLabels:
+            resourceAttributes:
+              - name: cluster_name
+              - name: cluster_id
 
   objectStorage:
     # Multicloud Object Gateway: the chart creates the claim, and NOTES.txt
