@@ -41,8 +41,10 @@ The `LokiStack` and the `ObjectBucketClaim` are gated on their CRDs existing, li
 other dependency CR in this chart, so **the first install does not create the store**: the
 release that creates the LokiStack is the same release that installs the Loki operator, and
 `helm install` rejects the entire manifest for an unknown kind rather than retrying. Run the
-same `helm upgrade --install` again once the CRDs are there — the parent `NOTES.txt` says so
-too, and `scripts/wait-for-crds.sh` waits for them. For a render without a cluster, where
+same `helm upgrade --install` again once `lokistacks.loki.grafana.com` is created and
+Established. With `objectStorage.obc.create`, also wait for
+`objectbucketclaims.objectbucket.io`; ODF must already be installed. The parent `NOTES.txt`
+prints the applicable wait commands. For a render without a cluster, where
 `lookup` always comes back empty, pass `--set skipCrdCheck=true --set global.skipCrdCheck=true`;
 the second flag is what a subchart can see.
 
@@ -180,7 +182,11 @@ values added:
 # step one, run twice: the store's CRs wait for the Loki operator's CRDs
 helm upgrade --install rhoai ./charts/rhai-on-openshift-chart \
   -f docs/examples/values-ai-grid-o11y-hub.yaml -n rhoai-gitops
-./scripts/wait-for-crds.sh
+oc wait --for=create --timeout=10m crd/lokistacks.loki.grafana.com
+oc wait --for=condition=Established --timeout=10m crd/lokistacks.loki.grafana.com
+# This example uses an ObjectBucketClaim; ODF must already be installed.
+oc wait --for=create --timeout=10m crd/objectbucketclaims.objectbucket.io
+oc wait --for=condition=Established --timeout=10m crd/objectbucketclaims.objectbucket.io
 helm upgrade --install rhoai ./charts/rhai-on-openshift-chart \
   -f docs/examples/values-ai-grid-o11y-hub.yaml -n rhoai-gitops
 

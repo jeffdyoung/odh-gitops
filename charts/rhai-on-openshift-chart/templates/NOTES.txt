@@ -93,8 +93,13 @@ first.
 {{- if $o11yHub.lokiStack.enabled }}
 1. The store's CRs are skipped until their operators' CRDs exist, so a first install creates
    the Loki operator and the ingest identities but not the LokiStack itself. Wait for the
-   CRDs, then run the same helm upgrade --install command again:
-     ./scripts/wait-for-crds.sh
+   CRDs to be created and Established, then run the same helm upgrade --install command again:
+     oc wait --for=create --timeout=10m crd/lokistacks.loki.grafana.com
+     oc wait --for=condition=Established --timeout=10m crd/lokistacks.loki.grafana.com
+{{- if $o11yHub.objectStorage.obc.create }}
+     oc wait --for=create --timeout=10m crd/objectbucketclaims.objectbucket.io
+     oc wait --for=condition=Established --timeout=10m crd/objectbucketclaims.objectbucket.io
+{{- end }}
    oc get lokistack {{ $o11yHub.lokiStack.name }} -n {{ $o11yHub.namespace }} tells you whether this step is still pending.
 {{- if $o11yHub.objectStorage.obc.create }}
 
