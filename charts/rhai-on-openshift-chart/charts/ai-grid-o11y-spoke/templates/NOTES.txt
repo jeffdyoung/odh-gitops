@@ -45,8 +45,12 @@ credential.enabled is false, so this release delivers no hub token and creates n
 one. That is the metrics-only shape: the ScrapeConfig and NetworkPolicy above are all of it.
 
 To deliver the hub credential as well, set credential.enabled and pass the token:
-  --set {{ .Chart.Name }}.credential.enabled=true
-  --set-file {{ .Chart.Name }}.credential.token=./hub-writer-token
+  --set credential.enabled=true
+  --set-file credential.token="$TOKEN_FILE"
+
+These keys apply to a standalone chart install. Through the parent chart, prefix them
+with ai-grid-o11y-spoke. and also set ai-grid-o11y-spoke.enabled=true. TOKEN_FILE must
+point to a private file holding the hub writer token.
 {{- end }}
 {{- else }}
 ai-grid-o11y-spoke rendered nothing: enabled is false.

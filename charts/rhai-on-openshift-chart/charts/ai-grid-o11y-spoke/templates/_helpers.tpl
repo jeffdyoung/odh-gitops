@@ -27,8 +27,9 @@ app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{/*
 The hub token, required rather than defaulted.
 
-The message names --set-file because that is the only form that keeps a multi-line
-ServiceAccount token out of shell history and out of any file the release records.
+--set-file keeps the token contents out of shell history and process arguments.
+Helm still stores the supplied value in release history, as well as in the rendered
+credential Secret; restrict access to both namespaces accordingly.
 */}}
 {{- define "ai-grid-o11y-spoke.token" -}}
 {{- .Values.credential.token | required "credential.token is required when ai-grid-o11y-spoke.credential.enabled is set: mint it on the hub with `oc create token <writer-sa> -n <o11y-namespace>` and pass it with --set-file ai-grid-o11y-spoke.credential.token=./token" -}}

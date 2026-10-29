@@ -86,7 +86,10 @@ credential:
   # collector starts.
   #
   # Never commit it. Supply it out of band:
-  #   --set-file ai-grid-o11y-spoke.credential.token=./token
+  #   --set-file credential.token=./token (standalone)
+  #   --set-file ai-grid-o11y-spoke.credential.token=./token (parent)
   # or from a values file kept out of version control. Under GitOps, template it from
   # whatever secret manager is in use rather than checking it in.
+  # Helm stores the supplied token in release history as well as the credential Secret.
+  # Restrict access to the release namespace as strictly as the credential namespace.
   token: ""

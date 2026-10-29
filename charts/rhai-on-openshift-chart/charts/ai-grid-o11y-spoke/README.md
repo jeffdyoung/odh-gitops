@@ -82,16 +82,19 @@ the operator namespace.
 Minted on the hub, against the writer identity that chart creates:
 
 ```bash
-oc create token usage-logs-writer -n ai-grid-o11y --duration=8760h > hub-writer-token
+TOKEN_FILE=$(mktemp)
+oc create token usage-logs-writer -n ai-grid-o11y --duration=8760h > "$TOKEN_FILE"
 ```
 
-It is a required value with no default, and it must not be committed:
+`mktemp` creates a private file. The token is a required value with no default,
+and it must not be committed:
 
 ```bash
 helm upgrade --install rhoai ./charts/rhai-on-openshift-chart \
   -f docs/examples/values-ai-grid-o11y-spoke.yaml \
-  --set-file ai-grid-o11y-spoke.credential.token=./hub-writer-token \
-  -n rhoai-gitops
+  --set-file ai-grid-o11y-spoke.credential.token="$TOKEN_FILE" \
+  -n rhoai-gitops --create-namespace
+rm -- "$TOKEN_FILE"
 ```
 
 **`--set-file` keeps the token out of git, not out of the cluster.** Helm records every supplied
@@ -128,14 +131,17 @@ services:
         # LokiStack is deployed and no object storage is needed.
         credentialSecret: hub-usage-logs-auth
         attributes:
-          cluster_name: jeyoungspoke1
-          cluster_id: eea5f0b3-5982-4eb1-b256-8e2443f7b3a0
+          cluster_name: <spoke-name>
+          cluster_id: <spoke-cluster-id>
         exporters:
           otlphttp/hub:
             endpoint: https://<hub-route>/api/logs/v1/infrastructure/otlp
 ```
 
-Nothing checks that the two names agree, because a subchart cannot see the parent's values.
+Replace the identity placeholders with this spoke's name and cluster ID; read the ID with
+`oc get clusterversion version -o jsonpath='{.spec.clusterID}'`.
+
+Nothing checks that the two Secret names agree, because a subchart cannot see the parent's values.
 A mismatch leaves the collector blocked on a Secret that will never appear.
 
 Two things the endpoint gets wrong silently, and neither is checkable here:

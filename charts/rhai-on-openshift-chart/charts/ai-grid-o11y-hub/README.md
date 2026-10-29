@@ -131,8 +131,12 @@ and no object it renders ever holds one** — a token is not a declarative objec
 minted imperatively:
 
 ```bash
-oc create token usage-logs-writer -n ai-grid-o11y --duration=8760h > hub-writer-token
+TOKEN_FILE=$(mktemp)
+oc create token usage-logs-writer -n ai-grid-o11y --duration=8760h > "$TOKEN_FILE"
 ```
+
+`mktemp` creates a private file. Keep the token in that file and pass its path,
+rather than its contents, to subsequent commands.
 
 That leaves the obvious question of where it goes. There are two destinations, and a spoke
 needs exactly one of them:
@@ -140,17 +144,17 @@ needs exactly one of them:
 | How the spoke is configured | Where the token goes |
 |---|---|
 | In an ACM fleet | a Secret in `spokePolicy.namespace` on this hub, named by `spokePolicy.credentialSecretName`. The policy delivers it to every selected spoke as encrypted ciphertext — nothing to do per spoke |
-| Directly | the [ai-grid-o11y-spoke](../ai-grid-o11y-spoke) chart on the spoke cluster, with `credential.enabled` set and `--set-file ai-grid-o11y-spoke.credential.token=./hub-writer-token`. It creates the Secret the collector mounts |
+| Directly | the [ai-grid-o11y-spoke](../ai-grid-o11y-spoke) chart on the spoke cluster, with `credential.enabled` set and `--set-file ai-grid-o11y-spoke.credential.token="$TOKEN_FILE"`. It creates the Secret the collector mounts |
 
 For the ACM path:
 
 ```bash
 oc create secret generic usage-logs-hub-credential -n ai-grid-policies \
-  --from-literal=token="$(oc create token usage-logs-writer -n ai-grid-o11y --duration=8760h)"
+  --from-file=token="$TOKEN_FILE"
 ```
 
 `NOTES.txt` prints both, resolved to the names this release actually used. Delete any local
-copy of the token afterwards.
+copy of the token after the selected delivery step: `rm -- "$TOKEN_FILE"`.
 
 That token is a portable bearer credential for the hub, bound to namespace and
 ServiceAccount but not to a pod or Secret, carrying the cluster's default audience. The
@@ -181,14 +185,14 @@ values added:
 ```bash
 # step one, run twice: the store's CRs wait for the Loki operator's CRDs
 helm upgrade --install rhoai ./charts/rhai-on-openshift-chart \
-  -f docs/examples/values-ai-grid-o11y-hub.yaml -n rhoai-gitops
+  -f docs/examples/values-ai-grid-o11y-hub.yaml -n rhoai-gitops --create-namespace
 oc wait --for=create --timeout=10m crd/lokistacks.loki.grafana.com
 oc wait --for=condition=Established --timeout=10m crd/lokistacks.loki.grafana.com
 # This example uses an ObjectBucketClaim; ODF must already be installed.
 oc wait --for=create --timeout=10m crd/objectbucketclaims.objectbucket.io
 oc wait --for=condition=Established --timeout=10m crd/objectbucketclaims.objectbucket.io
 helm upgrade --install rhoai ./charts/rhai-on-openshift-chart \
-  -f docs/examples/values-ai-grid-o11y-hub.yaml -n rhoai-gitops
+  -f docs/examples/values-ai-grid-o11y-hub.yaml -n rhoai-gitops --create-namespace
 
 # translate the ObjectBucketClaim if objectStorage.obc.create is set — see NOTES.txt
 oc wait --for=condition=Ready lokistack/usage-logs -n ai-grid-o11y --timeout=15m
@@ -197,12 +201,15 @@ ROUTE=$(oc get route usage-logs -n ai-grid-o11y -o jsonpath='{.spec.host}')
 # step two, with the Route host now known
 helm upgrade --install rhoai ./charts/rhai-on-openshift-chart \
   -f docs/examples/values-ai-grid-o11y-hub.yaml \
-  -f docs/examples/values-ai-grid-o11y-spoke-policy.yaml -n rhoai-gitops \
+  -f docs/examples/values-ai-grid-o11y-spoke-policy.yaml -n rhoai-gitops --create-namespace \
   --set ai-grid-o11y-hub.spokePolicy.endpoint="https://$ROUTE/api/logs/v1/infrastructure/otlp"
 
 # only now does ai-grid-policies exist, so the credential goes in after, not before
+TOKEN_FILE=$(mktemp)
+oc create token usage-logs-writer -n ai-grid-o11y --duration=8760h > "$TOKEN_FILE"
 oc create secret generic usage-logs-hub-credential -n ai-grid-policies \
-  --from-literal=token="$(oc create token usage-logs-writer -n ai-grid-o11y --duration=8760h)"
+  --from-file=token="$TOKEN_FILE"
+rm -- "$TOKEN_FILE"
 oc label managedcluster <spoke> ai-grid.redhat.com/maas=true
 ```
 
@@ -224,13 +231,15 @@ than one that refuses to render.
 points at. The Route's domain belongs to the cluster and may carry an
 infrastructure-specific prefix — on ROSA it is `apps.rosa.<name>...`, not `apps.<name>...` —
 so a composed host would be wrong on exactly the clusters where it matters. It is validated
-instead: a render fails if it ends in `/v1/logs`, which the collector's exporter appends and
-which would 404 every record, or if it does not address the `infrastructure` tenant.
+instead: it must be HTTPS, contain a hostname, and use exactly
+`/api/logs/v1/infrastructure/otlp`, without a query or fragment. The collector appends
+`/v1/logs`; including that suffix yourself would double it and fail every export.
 
-**`usageLogs.storage` is deliberately not delivered.** It is per-cluster — secret name and
-storage class — and belongs to whatever installs RHOAI on the spoke. This policy completes a
-spoke whose usage logs already run locally; it does not turn them on. A spoke needing both
-gets `storage` from its own install and the rest from here.
+**`usageLogs.storage` is deliberately not delivered.** A forwarding-only spoke needs no
+local store: the policy creates `usageLogs` with the remote exporter and credential reference
+where the spoke's install leaves it absent. Monitoring must be Managed on the spoke, as in
+`docs/examples/values-ai-grid-o11y-spoke-acm.yaml`. A spoke that also keeps a local copy gets
+its per-cluster storage configuration from its own install and the forwarding fields here.
 
 Two per-spoke values come from ACM templates rather than Helm, resolved per cluster at
 delivery:
@@ -257,8 +266,26 @@ token distributes as Compliant, and `ManagedClusterView` refuses Secrets, so the
 read back what a spoke holds. The signal that the chain works is records arriving here with
 the right `cluster_name`.
 
-When deleting, remove the Policy before the namespace, or the objects it delivered are
-orphaned on the spokes.
+### Safe teardown
+
+`DeleteIfCreated` removes a policy-created credential Secret but does not undo changes to a
+pre-existing DSCInitialization. Deleting the Policy first can leave the collector referring
+to a missing Secret, breaking forwarding and potentially the local write as well.
+
+1. Set `spokePolicy.remediationAction: inform` and upgrade the hub release. Wait until this
+   setting has propagated to the ConfigurationPolicy on every selected spoke, so enforcement
+   will not restore fields while you remove them. Keep the credential available.
+2. Update each spoke's source of truth to remove or replace the hub exporter and its
+   `usageLogs.credentialSecret` reference. Preserve `usageLogs.storage` if keeping local
+   logging. If there is no storage or remaining exporter, remove `usageLogs` entirely rather
+   than leaving an invalid empty configuration.
+3. Wait for reconciliation and verify that each collector no longer mounts the old Secret
+   or uses its token. Confirm that any retained local logging still works.
+4. Remove the Policy before its namespace so ACM can prune the objects it created. Remove
+   any remaining credential Secrets through their owner after checking for other consumers.
+
+Do not turn off `deliverCredential` as the first teardown step: removing the Secret template
+can prune the credential while the DSCI still references it.
 
 ## Sizing and retention
 
@@ -351,13 +378,18 @@ mode.
 ```bash
 oc wait --for=condition=Ready lokistack/usage-logs -n ai-grid-o11y --timeout=15m
 ROUTE=$(oc get route usage-logs -n ai-grid-o11y -o jsonpath='{.spec.host}')
-TOKEN=$(oc create token usage-logs-writer -n ai-grid-o11y --duration=1h)
-
-curl -sS -o /dev/null -w '%{http_code}\n' \
+(
+set -euo pipefail
+TOKEN_FILE=$(mktemp)
+trap 'rm -f -- "$TOKEN_FILE"' EXIT
+oc create token usage-logs-writer -n ai-grid-o11y --duration=1h > "$TOKEN_FILE"
+# Feed the header through stdin so the token never appears in curl's arguments.
+{ printf 'Authorization: Bearer '; cat "$TOKEN_FILE"; } | curl -sS -o /dev/null -w '%{http_code}\n' \
   -X POST "https://${ROUTE}/api/logs/v1/infrastructure/otlp/v1/logs" \
-  -H "Authorization: Bearer ${TOKEN}" -H 'Content-Type: application/json' \
+  --header @- -H 'Content-Type: application/json' \
   -d '{"resourceLogs":[{"resource":{"attributes":[{"key":"log_type","value":{"stringValue":"application"}}]},
        "scopeLogs":[{"logRecords":[{"timeUnixNano":"'"$(date +%s)"'000000000","body":{"stringValue":"probe"}}]}]}]}'
+)
 ```
 
 `204` means the write was accepted. Then confirm storage is actually exercised, which

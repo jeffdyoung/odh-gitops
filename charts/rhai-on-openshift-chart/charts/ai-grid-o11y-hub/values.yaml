@@ -165,7 +165,9 @@ spokePolicy:
   # `/otlp`. The collector's otlphttp exporter appends `/v1/logs` itself, so do not include
   # it. Not derived from the store this chart renders, because the Route's domain is the
   # cluster's and may carry an infrastructure-specific prefix — read it with
-  # `oc get route <stack> -n <namespace>` after the LokiStack is Ready. Required.
+  # `oc get route <stack> -n <namespace>` after the LokiStack is Ready. Required when delivering configuration.
+  # Must have a hostname and the exact `/api/logs/v1/infrastructure/otlp` path,
+  # without a query or fragment. Not read when `deliverConfiguration` is false.
   endpoint: ""
 
   # -- Name of the Secret in `spokePolicy.namespace` holding the writer token under key
@@ -184,6 +186,8 @@ spokePolicy:
   # -- What happens to the delivered objects when the Policy is deleted. `DeleteIfCreated`
   # removes those this policy created and leaves pre-existing ones; `DeleteAll` removes both;
   # `None` orphans everything.
+  # Changes to a pre-existing DSCI are not undone: remove its forwarding references before
+  # deleting a policy-created credential Secret. See the README teardown sequence.
   pruneObjectBehavior: DeleteIfCreated
 
   # -- Annotations added to the Policy, for ACM's governance catalogue.

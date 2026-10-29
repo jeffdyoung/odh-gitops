@@ -215,7 +215,7 @@
         "endpoint": {
           "type": "string",
           "pattern": "^(https://.*)?$",
-          "description": "Ingest endpoint spokes write to. Must be https:// — the policy ships it to every spoke, which sends the fleet writer token to it. Empty is allowed for deliverConfiguration: false, where it is not read."
+          "description": "HTTPS ingest endpoint with a hostname and the exact /api/logs/v1/infrastructure/otlp path, without a query or fragment. Empty is allowed for deliverConfiguration: false."
         },
         "credentialSecretName": {
           "type": "string",

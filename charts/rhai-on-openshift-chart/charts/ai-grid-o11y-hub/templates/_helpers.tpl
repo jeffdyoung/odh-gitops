@@ -94,6 +94,14 @@ matters, so it is read once and supplied.
 {{- if not (contains (printf "/api/logs/v1/%s/" (include "ai-grid-o11y-hub.tenant" .)) $e) -}}
 {{- fail (printf "spokePolicy.endpoint must address the %s tenant: records sent to another tenant are accepted and then unreadable (got %q)" (include "ai-grid-o11y-hub.tenant" .) $e) -}}
 {{- end -}}
+{{- $url := urlParse $e -}}
+{{- if not $url.hostname -}}
+{{- fail "spokePolicy.endpoint must include a hostname" -}}
+{{- end -}}
+{{- $path := printf "/api/logs/v1/%s/otlp" (include "ai-grid-o11y-hub.tenant" .) -}}
+{{- if or (ne $url.path $path) $url.query $url.fragment -}}
+{{- fail (printf "spokePolicy.endpoint must use the exact ingest base path %s without a query or fragment (got %q)" $path $e) -}}
+{{- end -}}
 {{- $e -}}
 {{- end }}
 

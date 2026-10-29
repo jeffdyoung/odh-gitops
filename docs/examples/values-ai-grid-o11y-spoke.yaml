@@ -13,11 +13,13 @@
 #
 #   helm upgrade --install rhoai ./charts/rhai-on-openshift-chart \
 #     -f docs/examples/values-ai-grid-o11y-spoke.yaml \
-#     --set-file ai-grid-o11y-spoke.credential.token=./hub-writer-token \
+#     --set-file ai-grid-o11y-spoke.credential.token="$TOKEN_FILE" \
 #     -n rhoai-gitops --create-namespace
 #
 # Mint that token on the hub:
-#   oc create token usage-logs-writer -n ai-grid-o11y --duration=8760h > hub-writer-token
+#   TOKEN_FILE=$(mktemp)
+#   oc create token usage-logs-writer -n ai-grid-o11y --duration=8760h > "$TOKEN_FILE"
+# Delete the private file after the install: rm -- "$TOKEN_FILE"
 #
 # A spoke in an ACM fleet needs nothing at all under
 # services.monitoring.dsci.usageLogs: the hub's spokePolicy delivers the whole
