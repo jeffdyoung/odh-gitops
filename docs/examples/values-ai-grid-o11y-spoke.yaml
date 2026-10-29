@@ -65,6 +65,11 @@ services:
       # reconcile. The chart defaults this to true for clusters that keep a local store.
       loki: false
     dsci:
+      # Required, and not a formality: the chart leaves this null, which resolves to
+      # `Removed` without a profile that sets it -- and then odh-observability deploys no
+      # collector at all and every value below is inert. The render still succeeds, so the
+      # only symptom is a spoke that quietly forwards nothing.
+      managementState: Managed
       usageLogs:
         # No storage. A spoke forwards its records to the hub and keeps no
         # usage-log store of its own, so omitting storage deploys no LokiStack --
