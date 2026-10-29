@@ -340,6 +340,25 @@ charts:
           - ai-grid-o11y-spoke.credential.token=snapshot-placeholder-token
           - ai-grid-o11y-spoke.credential.enabled=true
 
+      - name: ai-grid-o11y-spoke-credential-preserve-metrics
+        valuesFiles:
+          - docs/examples/values-ai-grid-o11y-spoke.yaml
+        setFlags:
+          - skipCrdCheck=true
+          - ai-grid-o11y-spoke.credential.token=snapshot-placeholder-token
+          # Credential delivery must preserve an independently configured metrics exporter
+          # when this chart's metrics federation is disabled by the example values.
+          - services.monitoring.dsci.metrics.exporters.prometheus/rhacm.endpoint=0.0.0.0:9999
+
+      - name: ai-grid-o11y-spoke-credential-reject-namespace-mismatch
+        valuesFiles:
+          - docs/examples/values-ai-grid-o11y-spoke.yaml
+        setFlags:
+          - ai-grid-o11y-spoke.credential.token=snapshot-placeholder-token
+          - ai-grid-o11y-spoke.collector.namespace=custom-monitoring
+        expectFail: true
+        expectMessage: "collector.namespace must match"
+
       - name: maas-profile-with-clusterip-route
         setFlags:
           - skipCrdCheck=true
