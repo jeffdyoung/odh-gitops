@@ -184,6 +184,148 @@
         }
       },
       "additionalProperties": false
+    },
+    "spokePolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253
+        },
+        "namespace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63
+        },
+        "createNamespace": {
+          "type": "boolean"
+        },
+        "deliverCredential": {
+          "type": "boolean",
+          "description": "Deliver the credential Secret to each spoke."
+        },
+        "deliverConfiguration": {
+          "type": "boolean",
+          "description": "Deliver the usageLogs patch to each spoke DSCInitialization."
+        },
+        "endpoint": {
+          "type": "string",
+          "pattern": "^(https://.*)?$",
+          "description": "Ingest endpoint spokes write to. Must be https:// — the policy ships it to every spoke, which sends the fleet writer token to it. Empty is allowed for deliverConfiguration: false, where it is not read."
+        },
+        "credentialSecretName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 253
+        },
+        "remediationAction": {
+          "type": "string",
+          "enum": [
+            "enforce",
+            "inform"
+          ]
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "pruneObjectBehavior": {
+          "type": "string",
+          "enum": [
+            "DeleteIfCreated",
+            "DeleteAll",
+            "None"
+          ]
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "placement": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 253
+            },
+            "clusterSet": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 253
+            },
+            "createClusterSetBinding": {
+              "type": "boolean"
+            },
+            "matchLabels": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "excludeLocalCluster": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "spoke": {
+          "type": "object",
+          "properties": {
+            "monitoringNamespace": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 63
+            },
+            "credentialSecretName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 253
+            },
+            "dsciName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 253
+            },
+            "exporterName": {
+              "type": "string",
+              "minLength": 1
+            },
+            "attributes": {
+              "type": "object",
+              "maxProperties": 20,
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "size": {
+              "type": "string",
+              "enum": [
+                "",
+                "1x.demo",
+                "1x.pico",
+                "1x.extra-small",
+                "1x.small",
+                "1x.medium"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false
